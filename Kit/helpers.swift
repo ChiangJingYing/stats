@@ -1040,34 +1040,83 @@ public class SMCHelper {
     
     private var connection: NSXPCConnection? = nil
     
-    public func setFanSpeed(_ id: Int, speed: Int) {
-        guard let helper = self.helper(nil) else { return }
+    @discardableResult
+    public func setFanSpeed(_ id: Int, speed: Int) -> Bool {
+        guard let helper = self.helper(nil) else { return false }
         helper.setFanSpeed(id: id, value: speed) { result in
             if let result, !result.isEmpty {
                 NSLog("set fan speed: \(result)")
             }
         }
+        return true
     }
     
-    public func setFanMode(_ id: Int, mode: Int) {
-        guard let helper = self.helper(nil) else { return }
+    @discardableResult
+    public func setFanMode(_ id: Int, mode: Int) -> Bool {
+        guard let helper = self.helper(nil) else { return false }
         helper.setFanMode(id: id, mode: mode) { result in
             if let result, !result.isEmpty {
                 NSLog("set fan mode: \(result)")
             }
         }
+        return true
     }
     
-    public func resetFanControl() {
-        guard let helper = self.helper(nil) else { return }
+    @discardableResult
+    public func resetFanControl() -> Bool {
+        guard let helper = self.helper(nil) else { return false }
         helper.resetFanControl { _ in }
+        return true
     }
     
     public func isActive() -> Bool {
         return self.connection != nil
     }
+
+    public func isAvailable(timeout: TimeInterval = 1, quiet: Bool = false) -> Bool {
+        guard self.isInstalled else { return false }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var completed = false
+        var available = false
+
+        func finish(_ state: Bool) {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !completed else { return }
+            completed = true
+            available = state
+            semaphore.signal()
+        }
+
+        guard let connection = self.helperConnection(),
+              let service = connection.remoteObjectProxyWithErrorHandler({ [weak self] error in
+                  if !quiet {
+                      print(error)
+                  }
+                  OperationQueue.main.addOperation { [weak self] in
+                      self?.connection = nil
+                  }
+                  finish(false)
+              }) as? HelperProtocol else {
+            return false
+        }
+
+        service.version { _ in
+            finish(true)
+        }
+
+        guard semaphore.wait(timeout: .now() + timeout) == .success else {
+            return false
+        }
+        return available
+    }
     
     public func checkForUpdate() {
+        guard self.isInstalled else { return }
+        guard self.isAvailable(timeout: 0.5, quiet: true) else { return }
+
         let helperURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LaunchServices/eu.exelban.Stats.SMC.Helper")
         guard let helperBundleInfo = CFBundleCopyInfoDictionaryForURL(helperURL as CFURL) as? [String: Any],
               let helperVersion = helperBundleInfo["CFBundleShortVersionString"] as? String,

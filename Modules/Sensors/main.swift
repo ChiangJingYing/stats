@@ -83,6 +83,15 @@ public class Sensors: Module {
             self?.selectedSensor = value
             self?.sensorsReader?.read()
         }
+        RemoteUDP.shared.fanCommandHandler = { [weak self] command in
+            self?.handleRemoteFanCommand(command) ?? RemoteUDPFanCommandAck(
+                deviceId: command.deviceId,
+                commandId: command.commandId,
+                status: .failed,
+                message: "sensors module unavailable"
+            )
+        }
+        RemoteUDP.shared.reload()
         
         self.setReaders([self.sensorsReader])
     }
@@ -105,6 +114,7 @@ public class Sensors: Module {
         self.popupView.usageCallback(value.sensors)
         self.portalView.usageCallback(value.sensors)
         self.notificationsView.usageCallback(value.sensors)
+        RemoteUDP.shared.sendTelemetry(self.remoteTelemetry(from: value.sensors))
         
         let activeWidgets = self.menuBar.widgets.filter{ $0.isActive }
         self.sensorsReader?.sleepMode(state: activeWidgets.contains(where: {$0.item is Label}) && activeWidgets.count == 1)
@@ -152,5 +162,147 @@ public class Sensors: Module {
             default: break
             }
         }
+    }
+
+    private func remoteTelemetry(from sensors: [Sensor_p]) -> RemoteUDPTelemetryPayload {
+        let commandChannelAvailable = Store.shared.bool(key: "RemoteUDP_receiveCommands", defaultValue: false)
+        let helperInstalled = SMCHelper.shared.isInstalled
+        let helperAvailable = SMCHelper.shared.isAvailable(timeout: 0.2, quiet: true)
+        let controlMode: RemoteUDPControlMode = (commandChannelAvailable && helperAvailable) ? .fullControl : .monitorOnly
+        let fans: [RemoteUDPFanTelemetry] = sensors.compactMap { sensor in
+            guard let fan = sensor as? Fan, !fan.isComputed else { return nil }
+            return RemoteUDPFanTelemetry(
+                id: fan.id,
+                name: fan.name,
+                rpm: Int(fan.value),
+                minRpm: Int(fan.minSpeed),
+                maxRpm: Int(fan.maxSpeed),
+                mode: fan.mode.isAutomatic ? .automatic : .manual
+            )
+        }
+        return RemoteUDPTelemetryPayload(
+            deviceId: self.remoteDeviceId,
+            deviceName: Host.current().localizedName ?? SystemKit.shared.device.model.name,
+            timestamp: Date().timeIntervalSince1970,
+            cpuTemperature: self.averageTemperature(in: sensors, group: .CPU),
+            gpuTemperature: self.averageTemperature(in: sensors, group: .GPU),
+            cpuUsage: RemoteUDP.shared.currentCPUUsage,
+            gpuUsage: RemoteUDP.shared.currentGPUUsage,
+            cpuCoreTemperatures: self.temperatureMetrics(in: sensors, group: .CPU, prefix: "cpu-temp"),
+            gpuCoreTemperatures: self.temperatureMetrics(in: sensors, group: .GPU, prefix: "gpu-temp"),
+            cpuCoreUsages: RemoteUDP.shared.currentCPUCoreUsages,
+            gpuCoreUsages: RemoteUDP.shared.currentGPUCoreUsages,
+            fans: fans,
+            fanControlAvailable: helperAvailable,
+            commandChannelAvailable: commandChannelAvailable,
+            controlMode: controlMode,
+            controlProvider: "app-proxy-smc-helper",
+            helperIdentifier: helperInstalled ? "eu.exelban.Stats.SMC.Helper" : nil
+        )
+    }
+
+    private var remoteDeviceId: String {
+        if let serial = SystemKit.shared.device.serialNumber, !serial.isEmpty {
+            return serial
+        }
+        let key = "RemoteUDP_deviceId"
+        let stored = Store.shared.string(key: key, defaultValue: "")
+        if !stored.isEmpty {
+            return stored
+        }
+        let id = UUID().uuidString
+        Store.shared.set(key: key, value: id)
+        return id
+    }
+
+    private func averageTemperature(in sensors: [Sensor_p], group: SensorGroup) -> Double? {
+        if let average = sensors.first(where: { $0.group == group && $0.type == .temperature && $0.isComputed && $0.key.hasPrefix("Average") }) {
+            return average.value
+        }
+        let values = sensors.filter { $0.group == group && $0.type == .temperature && !$0.isComputed }.map(\.value)
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    private func temperatureMetrics(in sensors: [Sensor_p], group: SensorGroup, prefix: String) -> [RemoteUDPMetricTelemetry] {
+        sensors
+            .filter { $0.group == group && $0.type == .temperature && !$0.isComputed }
+            .map {
+                RemoteUDPMetricTelemetry(
+                    id: "\(prefix)-\($0.key)",
+                    name: $0.name,
+                    value: $0.value,
+                    unit: "C"
+                )
+            }
+    }
+
+    private func handleRemoteFanCommand(_ command: RemoteUDPFanCommand) -> RemoteUDPFanCommandAck {
+        guard SMCHelper.shared.isInstalled else {
+            return self.remoteFanAck(command, status: .failed, message: "fan helper not installed")
+        }
+        guard SMCHelper.shared.isAvailable() else {
+            return self.remoteFanAck(command, status: .failed, message: "fan helper unavailable")
+        }
+
+        let fans = self.sensorsReader?.list.sensors.compactMap { $0 as? Fan }.filter { !$0.isComputed } ?? []
+        switch command.command {
+        case .reset:
+            guard SMCHelper.shared.resetFanControl() else {
+                return self.remoteFanAck(command, status: .failed, message: "fan helper unavailable")
+            }
+            fans.forEach { fan in
+                var updated = fan
+                updated.customMode = nil
+                updated.customSpeed = nil
+            }
+            return self.remoteFanAck(command, status: .ok, message: "fan control reset")
+        case .setModeAuto, .setModeManual, .setSpeed:
+            guard let fanId = command.fanId, var fan = fans.first(where: { $0.id == fanId }) else {
+                return self.remoteFanAck(command, status: .rejected, message: "fan not found")
+            }
+
+            if command.command == .setSpeed {
+                guard let speed = command.speed else {
+                    return self.remoteFanAck(command, status: .rejected, message: "missing speed")
+                }
+                let telemetry = RemoteUDPFanTelemetry(
+                    id: fan.id,
+                    name: fan.name,
+                    rpm: Int(fan.value),
+                    minRpm: Int(fan.minSpeed),
+                    maxRpm: Int(fan.maxSpeed),
+                    mode: fan.mode.isAutomatic ? .automatic : .manual
+                )
+                if case let .rejected(reason) = RemoteUDPFanCommand.validateSpeed(speed, for: telemetry) {
+                    return self.remoteFanAck(command, status: .rejected, message: reason)
+                }
+                if fan.mode != .forced {
+                    guard SMCHelper.shared.setFanMode(fan.id, mode: FanMode.forced.rawValue) else {
+                        return self.remoteFanAck(command, status: .failed, message: "fan helper unavailable")
+                    }
+                    fan.customMode = .forced
+                }
+                guard SMCHelper.shared.setFanSpeed(fan.id, speed: speed) else {
+                    return self.remoteFanAck(command, status: .failed, message: "fan helper unavailable")
+                }
+                fan.customSpeed = speed
+                return self.remoteFanAck(command, status: .ok, message: "fan speed set")
+            }
+
+            let mode: FanMode = command.command == .setModeAuto ? .automatic : .forced
+            guard SMCHelper.shared.setFanMode(fan.id, mode: mode.rawValue) else {
+                return self.remoteFanAck(command, status: .failed, message: "fan helper unavailable")
+            }
+            fan.customMode = mode.isAutomatic ? nil : mode
+            if mode.isAutomatic {
+                fan.customSpeed = nil
+            }
+            return self.remoteFanAck(command, status: .ok, message: "fan mode set")
+        }
+    }
+
+    private func remoteFanAck(_ command: RemoteUDPFanCommand, status: RemoteUDPFanCommandAck.Status, message: String) -> RemoteUDPFanCommandAck {
+        RemoteUDPFanCommandAck(deviceId: self.remoteDeviceId, commandId: command.commandId, status: status, message: message)
     }
 }

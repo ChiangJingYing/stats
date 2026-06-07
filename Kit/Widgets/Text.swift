@@ -71,9 +71,16 @@ public class TextWidget: WidgetWrapper {
     public func setValue(_ newValue: String) {
         guard self.value != newValue else { return }
         self.value = newValue
-        DispatchQueue.main.async(execute: {
+
+        let render = {
             self.display()
-        })
+        }
+
+        if Thread.isMainThread {
+            render()
+        } else {
+            DispatchQueue.main.async(execute: render)
+        }
     }
     
     static public func parseText(_ raw: String) -> [KeyValue_t] {

@@ -297,6 +297,8 @@ public extension Notification.Name {
     static let remoteLoginSuccess = Notification.Name("remoteLoginSuccess")
     static let remoteState = Notification.Name("remoteState")
     static let remoteAuthenticated = Notification.Name("remoteAuthenticated")
+    static let remoteUDPTelemetry = Notification.Name("remoteUDPTelemetry")
+    static let remoteUDPCommandAck = Notification.Name("remoteUDPCommandAck")
     static let openWindow = Notification.Name("openWindow")
 }
 

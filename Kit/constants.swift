@@ -61,6 +61,7 @@ public enum ModuleType: Int {
     case bluetooth
     case clock
     case remote
+    case remoteUDP
     
     case combined
     
@@ -76,6 +77,7 @@ public enum ModuleType: Int {
         case .bluetooth: return "Bluetooth"
         case .clock: return "Clock"
         case .remote: return "Remote"
+        case .remoteUDP: return "Remote UDP"
         case .combined: return ""
         }
     }

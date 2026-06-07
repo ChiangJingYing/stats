@@ -12,7 +12,7 @@
 import Cocoa
 import Kit
 
-class ApplicationSettings: NSStackView {
+class ApplicationSettings: NSStackView, NSTextFieldDelegate {
     private var updateIntervalValue: String {
         Store.shared.string(key: "update-interval", defaultValue: AppUpdateInterval.silent.rawValue)
     }
@@ -53,10 +53,16 @@ class ApplicationSettings: NSStackView {
     private var updateSelector: NSPopUpButton?
     private var startAtLoginBtn: NSSwitch?
     private var remoteControlBtn: NSSwitch?
+    private var remoteUDPDevicesField: NSTextField?
+    private var fanHelperStatusField: NSTextField?
+    private let remoteUDPSummaryQueue = DispatchQueue(label: "eu.exelban.Stats.AppSettings.RemoteUDPSummary")
     
     private var combinedModulesView: PreferencesSection?
     private var fanHelperView: PreferencesSection?
     private var remoteView: PreferencesSection?
+    private var remoteUDPView: PreferencesSection?
+    private var remoteUDPSummaryDirty = false
+    private var remoteUDPSummaryScheduled = false
     
     private var updateWindow: UpdateWindow?
     private let moduleSelector: ModuleSelectorView = ModuleSelectorView()
@@ -165,6 +171,55 @@ class ApplicationSettings: NSStackView {
         self.remoteView?.setRowVisibility(3, newState: false)
         self.remoteView?.setRowVisibility(4, newState: false)
         self.remoteView?.setRowVisibility(5, newState: false)
+
+        self.remoteUDPDevicesField = self.remoteUDPDevicesTextField(self.remoteUDPDevicesSummary())
+        self.remoteUDPView = PreferencesSection(title: localizedString("Remote UDP"), [
+            PreferencesRow(localizedString("Send telemetry"), component: switchView(
+                action: #selector(self.toggleRemoteUDPSendTelemetry),
+                state: Store.shared.bool(key: "RemoteUDP_sendTelemetry", defaultValue: false)
+            )),
+            PreferencesRow(localizedString("Receive telemetry"), component: switchView(
+                action: #selector(self.toggleRemoteUDPReceiveTelemetry),
+                state: Store.shared.bool(key: "RemoteUDP_receiveTelemetry", defaultValue: false)
+            )),
+            PreferencesRow(localizedString("Receive fan commands"), component: switchView(
+                action: #selector(self.toggleRemoteUDPReceiveCommands),
+                state: Store.shared.bool(key: "RemoteUDP_receiveCommands", defaultValue: false)
+            )),
+            PreferencesRow(localizedString("Target host"), component: self.inputField(
+                id: "RemoteUDP_targetHost",
+                value: Store.shared.string(key: "RemoteUDP_targetHost", defaultValue: ""),
+                placeholder: "127.0.0.1"
+            )),
+            PreferencesRow(localizedString("Telemetry target port"), component: self.inputField(
+                id: "RemoteUDP_telemetryTargetPort",
+                value: "\(Store.shared.int(key: "RemoteUDP_telemetryTargetPort", defaultValue: 7530))",
+                placeholder: "7530"
+            )),
+            PreferencesRow(localizedString("Telemetry listen port"), component: self.inputField(
+                id: "RemoteUDP_telemetryListenPort",
+                value: "\(Store.shared.int(key: "RemoteUDP_telemetryListenPort", defaultValue: 7530))",
+                placeholder: "7530"
+            )),
+            PreferencesRow(localizedString("Command target port"), component: self.inputField(
+                id: "RemoteUDP_commandTargetPort",
+                value: "\(Store.shared.int(key: "RemoteUDP_commandTargetPort", defaultValue: 7531))",
+                placeholder: "7531"
+            )),
+            PreferencesRow(localizedString("Command listen port"), component: self.inputField(
+                id: "RemoteUDP_commandListenPort",
+                value: "\(Store.shared.int(key: "RemoteUDP_commandListenPort", defaultValue: 7531))",
+                placeholder: "7531"
+            )),
+            PreferencesRow(localizedString("Shared secret"), component: self.inputField(
+                id: "RemoteUDP_sharedSecret",
+                value: Store.shared.string(key: "RemoteUDP_sharedSecret", defaultValue: ""),
+                placeholder: localizedString("Required for commands"),
+                secure: true
+            )),
+            PreferencesRow(localizedString("Received devices"), component: self.remoteUDPDevicesField!)
+        ])
+        scrollView.stackView.addArrangedSubview(self.remoteUDPView!)
         
         scrollView.stackView.addArrangedSubview(PreferencesSection(title: localizedString("Settings"), [
             PreferencesRow(
@@ -181,7 +236,16 @@ class ApplicationSettings: NSStackView {
             )
         ]))
         
+        self.fanHelperStatusField = textView(self.fanHelperStatusText())
         self.fanHelperView = PreferencesSection([
+            PreferencesRow(
+                localizedString("Fan helper"),
+                component: self.fanHelperStatusField!
+            ),
+            PreferencesRow(
+                localizedString("Install fan helper"),
+                component: buttonView(#selector(self.installHelper), text: self.fanHelperInstallTitle())
+            ),
             PreferencesRow(
                 localizedString("Uninstall fan helper"),
                 component: buttonView(#selector(self.uninstallHelper), text: localizedString("Uninstall"))
@@ -210,6 +274,7 @@ class ApplicationSettings: NSStackView {
         
         NotificationCenter.default.addObserver(self, selector: #selector(self.toggleUninstallHelperButton), name: .fanHelperState, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.handleRemoteState), name: .remoteState, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.handleRemoteUDPTelemetry), name: .remoteUDPTelemetry, object: nil)
     }
     
     required init?(coder: NSCoder) {
@@ -218,6 +283,8 @@ class ApplicationSettings: NSStackView {
     
     deinit {
         NotificationCenter.default.removeObserver(self, name: .fanHelperState, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .remoteState, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .remoteUDPTelemetry, object: nil)
     }
     
     internal func viewWillAppear() {
@@ -226,6 +293,7 @@ class ApplicationSettings: NSStackView {
         
         self.planField?.stringValue = SystemStats.shared.plan?.rawValue.capitalized ?? "Free"
         self.setRemoteSettings(SystemStats.shared.isAuthorized)
+        self.remoteUDPDevicesField?.stringValue = self.remoteUDPDevicesSummary()
         
         var idx = self.updateSelector?.indexOfSelectedItem ?? 0
         if let items = self.updateSelector?.menu?.items {
@@ -411,11 +479,22 @@ class ApplicationSettings: NSStackView {
         guard let state = notification.userInfo?["state"] as? Bool, let v = self.fanHelperView else {
             return
         }
-        v.isHidden = !state
+        v.isHidden = false
+        self.fanHelperStatusField?.stringValue = state ? self.fanHelperStatusText() : localizedString("Not installed")
+    }
+
+    @objc private func installHelper() {
+        SMCHelper.shared.install { status in
+            DispatchQueue.main.async {
+                self.fanHelperStatusField?.stringValue = self.fanHelperStatusText()
+                NotificationCenter.default.post(name: .fanHelperState, object: nil, userInfo: ["state": status])
+            }
+        }
     }
     
     @objc private func uninstallHelper() {
         SMCHelper.shared.uninstall()
+        self.fanHelperStatusField?.stringValue = self.fanHelperStatusText()
     }
     
     @objc private func toggleCPUeStressTest() {
@@ -503,6 +582,138 @@ class ApplicationSettings: NSStackView {
                 self.remoteView?.setRowVisibility(5, newState: false)
             }
         }
+    }
+
+    @objc private func toggleRemoteUDPSendTelemetry(_ sender: NSButton) {
+        Store.shared.set(key: "RemoteUDP_sendTelemetry", value: sender.state == .on)
+    }
+
+    @objc private func toggleRemoteUDPReceiveTelemetry(_ sender: NSButton) {
+        Store.shared.set(key: "RemoteUDP_receiveTelemetry", value: sender.state == .on)
+        RemoteUDP.shared.reload()
+    }
+
+    @objc private func toggleRemoteUDPReceiveCommands(_ sender: NSButton) {
+        if sender.state == .on && Store.shared.string(key: "RemoteUDP_sharedSecret", defaultValue: "").isEmpty {
+            let alert = NSAlert()
+            alert.messageText = localizedString("Warning")
+            alert.informativeText = localizedString("Remote fan commands require a shared secret.")
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: localizedString("OK"))
+            alert.runModal()
+            sender.state = .off
+            return
+        }
+        Store.shared.set(key: "RemoteUDP_receiveCommands", value: sender.state == .on)
+        RemoteUDP.shared.reload()
+    }
+
+    @objc private func handleRemoteUDPTelemetry(_ notification: Notification) {
+        let shouldSchedule = self.remoteUDPSummaryQueue.sync { () -> Bool in
+            self.remoteUDPSummaryDirty = true
+            guard !self.remoteUDPSummaryScheduled else { return false }
+            self.remoteUDPSummaryScheduled = true
+            return true
+        }
+
+        guard shouldSchedule else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.flushRemoteUDPSummary()
+        }
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField,
+              let identifier = field.identifier?.rawValue,
+              identifier.hasPrefix("RemoteUDP_") else { return }
+
+        if identifier.hasSuffix("Port") {
+            let filtered = field.stringValue.filter { "0123456789".contains($0) }
+            if filtered != field.stringValue {
+                field.stringValue = filtered
+            }
+            guard let port = Int(field.stringValue), port > 0, port <= 65_535 else { return }
+            Store.shared.set(key: identifier, value: port)
+        } else {
+            Store.shared.set(key: identifier, value: field.stringValue)
+        }
+
+        if identifier == "RemoteUDP_telemetryListenPort" ||
+            identifier == "RemoteUDP_commandListenPort" ||
+            identifier == "RemoteUDP_sharedSecret" {
+            RemoteUDP.shared.reload()
+        }
+    }
+
+    private func inputField(id: String, value: String, placeholder: String, secure: Bool = false) -> NSTextField {
+        let field: NSTextField = secure ? NSSecureTextField() : NSTextField()
+        field.identifier = NSUserInterfaceItemIdentifier(id)
+        field.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        field.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        field.textColor = .textColor
+        field.isEditable = true
+        field.isSelectable = true
+        field.usesSingleLineMode = true
+        field.maximumNumberOfLines = 1
+        field.focusRingType = .none
+        field.stringValue = value
+        field.delegate = self
+        field.placeholderString = placeholder
+        return field
+    }
+
+    private func remoteUDPDevicesTextField(_ value: String) -> NSTextField {
+        let field = textView(value)
+        field.widthAnchor.constraint(equalToConstant: 230).isActive = true
+        field.maximumNumberOfLines = 4
+        field.lineBreakMode = .byTruncatingTail
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return field
+    }
+
+    private func remoteUDPDevicesSummary() -> String {
+        RemoteUDPDisplayFormatter.settingsSummary(RemoteUDP.shared.receivedDevices)
+    }
+
+    private func flushRemoteUDPSummary() {
+        guard self.window?.isVisible ?? false else {
+            self.remoteUDPSummaryQueue.sync {
+                self.remoteUDPSummaryScheduled = false
+            }
+            return
+        }
+
+        self.remoteUDPSummaryQueue.sync {
+            self.remoteUDPSummaryDirty = false
+        }
+        self.remoteUDPDevicesField?.stringValue = self.remoteUDPDevicesSummary()
+
+        let needsAnotherPass = self.remoteUDPSummaryQueue.sync { () -> Bool in
+            if self.remoteUDPSummaryDirty {
+                return true
+            }
+            self.remoteUDPSummaryScheduled = false
+            return false
+        }
+
+        guard needsAnotherPass else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.flushRemoteUDPSummary()
+        }
+    }
+
+    private func fanHelperStatusText() -> String {
+        if !SMCHelper.shared.isInstalled {
+            return localizedString("Not installed")
+        }
+        if SMCHelper.shared.isAvailable(timeout: 0.5, quiet: true) {
+            return localizedString("Installed")
+        }
+        return localizedString("Installed but unavailable")
+    }
+
+    private func fanHelperInstallTitle() -> String {
+        SMCHelper.shared.isInstalled ? localizedString("Reinstall") : localizedString("Install")
     }
     
     @objc private func toggleSystemWidgetsUpdatesState(_ sender: NSButton) {

@@ -67,8 +67,14 @@ open class PopupWrapper: NSStackView, Popup_p {
     }
     
     public func apply<T>(_ value: T, to cache: PopupCache<T>, render: @escaping (T) -> Void) {
-        DispatchQueue.main.async {
+        let applyUpdate = {
             cache.apply(value, visible: self.window?.isVisible ?? false, render: render)
+        }
+
+        if Thread.isMainThread {
+            applyUpdate()
+        } else {
+            DispatchQueue.main.async(execute: applyUpdate)
         }
     }
     

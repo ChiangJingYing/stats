@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Name</key>
+	<string>Remote UDP</string>
+	<key>Settings</key>
+	<dict>
+		<key>notifications</key>
+		<false/>
+		<key>popup</key>
+		<true/>
+	</dict>
+	<key>State</key>
+	<false/>
+	<key>Symbol</key>
+	<string>antenna.radiowaves.left.and.right</string>
+	<key>Widgets</key>
+	<dict>
+		<key>label</key>
+		<dict>
+			<key>Default</key>
+			<false/>
+			<key>Order</key>
+			<integer>0</integer>
+			<key>Title</key>
+			<string>UDP</string>
+		</dict>
+		<key>sensors</key>
+		<dict>
+			<key>Default</key>
+			<true/>
+			<key>Order</key>
+			<integer>1</integer>
+			<key>Preview</key>
+			<dict>
+				<key>Values</key>
+				<string>Studio,49°,2100</string>
+			</dict>
+		</dict>
+		<key>text</key>
+		<dict>
+			<key>Default</key>
+			<false/>
+			<key>Order</key>
+			<integer>2</integer>
+			<key>Preview</key>
+			<dict/>
+			<key>Title</key>
+			<string>Remote</string>
+		</dict>
+	</dict>
+</dict>
+</plist>
