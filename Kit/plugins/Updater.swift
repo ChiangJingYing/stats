@@ -298,18 +298,25 @@ public class Updater {
         guard SecCodeCopyStaticCode(selfCode, [], &selfStatic) == errSecSuccess, let selfStatic else {
             return "SecCodeCopyStaticCode failed"
         }
-        guard let selfTeam = self.teamID(for: selfStatic) else {
-            return "could not read current team ID"
+        if let selfTeam = self.teamID(for: selfStatic), let dmgTeam = self.teamID(for: code) {
+            if selfTeam != dmgTeam {
+                return "team ID mismatch: \(selfTeam) vs \(dmgTeam)"
+            }
+            return nil
         }
-        guard let dmgTeam = self.teamID(for: code) else {
-            return "could not read DMG team ID"
+
+        guard let selfCertificate = self.leafCertificateData(for: selfStatic) else {
+            return "could not read current signing certificate"
         }
-        if selfTeam != dmgTeam {
-            return "team ID mismatch: \(selfTeam) vs \(dmgTeam)"
+        guard let dmgCertificate = self.leafCertificateData(for: code) else {
+            return "could not read DMG signing certificate"
+        }
+        if selfCertificate != dmgCertificate {
+            return "signing certificate mismatch"
         }
         return nil
     }
-    
+
     private func teamID(for code: SecStaticCode) -> String? {
         var info: CFDictionary?
         guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
@@ -317,6 +324,17 @@ public class Updater {
             return nil
         }
         return dict[kSecCodeInfoTeamIdentifier as String] as? String
+    }
+
+    private func leafCertificateData(for code: SecStaticCode) -> Data? {
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let dict = info as? [String: Any],
+              let certificates = dict[kSecCodeInfoCertificates as String] as? [SecCertificate],
+              let certificate = certificates.first else {
+            return nil
+        }
+        return SecCertificateCopyData(certificate) as Data
     }
     
     private func runElevated(_ tool: String, args: [String]) -> String? {

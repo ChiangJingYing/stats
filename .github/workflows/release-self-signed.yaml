@@ -1,0 +1,129 @@
+name: self-signed release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v3.0.1"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: self-signed-release-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  CODE_SIGN_IDENTITY: "Stats Remote Local Code Signing"
+  APP_NAME: "Stats"
+  DMG_NAME: "Stats.dmg"
+
+jobs:
+  release:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: release-tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RELEASE_TAG="${{ inputs.tag }}"
+          else
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          fi
+
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "Release tag is required" >&2
+            exit 1
+          fi
+
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Import self-signed certificate
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ runner.temp }}-keychain-password
+        run: |
+          if [ -z "$MACOS_CERTIFICATE_P12" ]; then
+            echo "Missing MACOS_CERTIFICATE_P12 secret" >&2
+            exit 1
+          fi
+          if [ -z "$MACOS_CERTIFICATE_PASSWORD" ]; then
+            echo "Missing MACOS_CERTIFICATE_PASSWORD secret" >&2
+            exit 1
+          fi
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/stats-local-codesign.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 -D > "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERTIFICATE_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Build signed app
+        run: |
+          xcodebuild build \
+            -scheme "$APP_NAME" \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY" \
+            DEVELOPMENT_TEAM="" \
+            CODE_SIGNING_ALLOWED=YES
+
+      - name: Package DMG
+        run: |
+          APP_PATH="$RUNNER_TEMP/DerivedData/Build/Products/Release/$APP_NAME.app"
+          PACKAGE_DIR="$RUNNER_TEMP/dmg"
+
+          test -d "$APP_PATH"
+          rm -rf "$PACKAGE_DIR" "$DMG_NAME"
+          mkdir -p "$PACKAGE_DIR"
+          cp -R "$APP_PATH" "$PACKAGE_DIR/$APP_NAME.app"
+
+          codesign -dv --verbose=4 "$PACKAGE_DIR/$APP_NAME.app"
+          codesign --verify --deep --strict --verbose=2 "$PACKAGE_DIR/$APP_NAME.app"
+
+          hdiutil create \
+            -volname "$APP_NAME" \
+            -srcfolder "$PACKAGE_DIR" \
+            -ov \
+            -format UDZO \
+            "$DMG_NAME"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release-tag.outputs.tag }}
+          files: ${{ env.DMG_NAME }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
