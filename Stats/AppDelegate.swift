@@ -21,7 +21,7 @@ import GPU
 import Bluetooth
 import Clock
 
-let updater = Updater(github: "exelban/stats", url: "https://api.mac-stats.com/release/latest")
+let updater = Updater(github: "ChiangJingYing/stats", url: "https://api.github.com/repos/ChiangJingYing/stats/releases/latest")
 var modules: [Module] = [
     CPU(),
     GPU(),
