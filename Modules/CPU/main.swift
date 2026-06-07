@@ -195,7 +195,12 @@ public class CPU: Module {
     
     private func loadCallback(_ raw: CPU_Load?) {
         guard let value = raw, self.enabled else { return }
-        
+
+        RemoteUDP.shared.updateCPUUsage(
+            total: value.totalUsage,
+            cores: self.remoteCoreUsage(from: value)
+        )
+
         self.popupView.loadCallback(value)
         self.portalView.callback(value)
         self.notificationsView.loadCallback(value)
@@ -267,6 +272,33 @@ public class CPU: Module {
             }
             WidgetCenter.shared.reloadTimelines(ofKind: CPU_entry.kind)
             WidgetCenter.shared.reloadTimelines(ofKind: "UnitedWidget")
+        }
+    }
+
+    private func remoteCoreUsage(from value: CPU_Load) -> [RemoteUDPMetricTelemetry] {
+        let cores = SystemKit.shared.device.info.cpu?.cores ?? []
+        return value.usagePerCore.enumerated().map { index, usage in
+            let core = cores.first { Int($0.id) == index }
+            return RemoteUDPMetricTelemetry(
+                id: "cpu-\(index)",
+                name: self.remoteCoreName(core, fallback: index),
+                value: usage,
+                unit: "%"
+            )
+        }
+    }
+
+    private func remoteCoreName(_ core: core_s?, fallback index: Int) -> String {
+        guard let core else { return "Core \(index)" }
+        switch core.type {
+        case .efficiency:
+            return "Efficiency core \(index)"
+        case .performance:
+            return "Performance core \(index)"
+        case .super:
+            return "Super core \(index)"
+        case .unknown:
+            return "Core \(index)"
         }
     }
 }

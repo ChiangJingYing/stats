@@ -15,16 +15,18 @@ public struct Stack_t: KeyValue_p {
     public var key: String
     public var value: String
     public var label: String?
+    public var singleRow: Bool
     
     var index: Int {
         get { Store.shared.int(key: "stack_\(self.key)_index", defaultValue: -1) }
         set { Store.shared.set(key: "stack_\(self.key)_index", value: newValue) }
     }
     
-    public init(key: String, value: String, label: String? = nil) {
+    public init(key: String, value: String, label: String? = nil, singleRow: Bool = false) {
         self.key = key
         self.value = value
         self.label = label
+        self.singleRow = singleRow
     }
 }
 
@@ -111,10 +113,11 @@ public class StackWidget: WidgetWrapper {
                 let secondElement: Stack_t? = values.indices.contains(i+1) ? values[i+1] : nil
                 
                 var width: CGFloat = 0
-                if mode == .auto && secondElement == nil {
+                if firstElement.singleRow || (mode == .auto && secondElement == nil) {
                     width += self.drawOneRow(x, firstElement)
                 } else {
                     width += self.drawTwoRows(x, firstElement, secondElement)
+                    i += 1
                 }
                 
                 x += width
@@ -125,7 +128,6 @@ public class StackWidget: WidgetWrapper {
                     totalWidth += Constants.Widget.spacing
                 }
                 
-                i += 1
             case .oneRow:
                 let width = self.drawOneRow(x, values[i])
                 
@@ -228,12 +230,14 @@ public class StackWidget: WidgetWrapper {
     }
     
     public func setValues(_ values: [Stack_t]) {
-        DispatchQueue.main.async(execute: {
+        let render = {
             var tableNeedsToBeUpdated: Bool = false
             
             values.forEach { (p: Stack_t) in
                 if let idx = self.values.firstIndex(where: { $0.key == p.key }) {
                     self.values[idx].value = p.value
+                    self.values[idx].label = p.label
+                    self.values[idx].singleRow = p.singleRow
                     return
                 }
                 tableNeedsToBeUpdated = true
@@ -250,7 +254,13 @@ public class StackWidget: WidgetWrapper {
                 self.orderTableView.update()
             }
             self.display()
-        })
+        }
+
+        if Thread.isMainThread {
+            render()
+        } else {
+            DispatchQueue.main.async(execute: render)
+        }
     }
     
     // MARK: - Settings

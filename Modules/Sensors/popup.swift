@@ -40,6 +40,7 @@ internal class Popup: PopupWrapper {
     private var sensors: [Sensor_p] = []
     private let settingsView: NSStackView = NSStackView()
     private let sensorsCache = PopupCache<[Sensor_p]>()
+    private let contentWidth = Constants.Popup.width
     
     private var fanControlState: Bool {
         get { Store.shared.bool(key: "Sensors_fanControl", defaultValue: true) }
@@ -54,6 +55,7 @@ internal class Popup: PopupWrapper {
         self.orientation = .vertical
         self.spacing = 0
         self.translatesAutoresizingMaskIntoConstraints = false
+        self.widthAnchor.constraint(equalToConstant: self.contentWidth).isActive = true
         
         self.settingsView.orientation = .vertical
         self.settingsView.spacing = Constants.Settings.margin
@@ -119,11 +121,11 @@ internal class Popup: PopupWrapper {
             fans.forEach { (f: Sensor_p) in
                 if let fan = f as? Fan {
                     if f.isComputed {
-                        let sensor = SensorView(fan, width: self.frame.width, toggleable: false) {}
+                        let sensor = SensorView(fan, width: self.contentWidth, toggleable: false) {}
                         self.list[fan.key] = sensor
                         container.addArrangedSubview(sensor)
                     } else {
-                        let view = FanView(fan, width: self.frame.width) { [weak self] in
+                        let view = FanView(fan, width: self.contentWidth) { [weak self] in
                             let h = container.arrangedSubviews.map({ $0.bounds.height + container.spacing }).reduce(0, +) - container.spacing
                             if container.frame.size.height != h && h >= 0 {
                                 container.setFrameSize(NSSize(width: container.frame.width, height: h))
@@ -179,10 +181,10 @@ internal class Popup: PopupWrapper {
             filtered = filtered.filter{ $0.popupState }
             if filtered.isEmpty { return }
             
-            self.addArrangedSubview(separatorView(localizedString(typ.rawValue), width: self.frame.width))
+            self.addArrangedSubview(separatorView(localizedString(typ.rawValue), width: self.contentWidth))
             groups.forEach { (group: SensorGroup) in
                 filtered.filter{ $0.group == group }.forEach { (s: Sensor_p) in
-                    let sensor = SensorView(s, width: self.frame.width) { [weak self] in
+                    let sensor = SensorView(s, width: self.contentWidth) { [weak self] in
                         self?.recalculateHeight()
                     }
                     self.addArrangedSubview(sensor)
@@ -231,7 +233,7 @@ internal class Popup: PopupWrapper {
     private func recalculateHeight() {
         let h = self.arrangedSubviews.map({ $0.bounds.height + self.spacing }).reduce(0, +) - self.spacing
         if self.frame.size.height != h {
-            self.setFrameSize(NSSize(width: self.frame.width, height: h))
+            self.setFrameSize(NSSize(width: self.contentWidth, height: h))
             self.sizeCallback?(self.frame.size)
         }
     }
@@ -252,7 +254,7 @@ internal class Popup: PopupWrapper {
     // MARK: helpers
     
     private func fansSeparatorView() -> NSView {
-        let view: NSStackView = NSStackView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 26))
+        let view: NSStackView = NSStackView(frame: NSRect(x: 0, y: 0, width: self.contentWidth, height: 26))
         view.widthAnchor.constraint(equalToConstant: view.frame.width).isActive = true
         view.heightAnchor.constraint(equalToConstant: view.bounds.height).isActive = true
         view.orientation = .horizontal
@@ -634,7 +636,7 @@ internal class FanView: NSStackView {
         container.distribution = .fillProportionally
         container.spacing = 0
         
-        let button: NSButton = NSButton(title: localizedString("Install fan helper"), target: nil, action: #selector(self.installHelper))
+        let button: NSButton = NSButton(title: self.helperInstallTitle(), target: nil, action: #selector(self.installHelper))
         button.isBordered = false
         button.target = self
         
@@ -948,7 +950,7 @@ internal class FanView: NSStackView {
     }
     
     private func setupControls(_ isInstalled: Bool? = nil) {
-        let helperState = isInstalled ?? SMCHelper.shared.isInstalled
+        let helperState = isInstalled ?? SMCHelper.shared.isAvailable(timeout: 0.5, quiet: true)
         
         if !self.controlState {
             self.helperView?.removeFromSuperview()
@@ -966,6 +968,8 @@ internal class FanView: NSStackView {
             } else {
                 self.buttonsView?.removeFromSuperview()
                 self.controlView?.removeFromSuperview()
+                self.helperView?.removeFromSuperview()
+                self.helperView = self.noHelper()
                 if let v = self.helperView {
                     self.addArrangedSubview(v)
                 }
@@ -978,8 +982,12 @@ internal class FanView: NSStackView {
     }
     
     @objc private func changeHelperState(_ notification: Notification) {
-        guard let state = notification.userInfo?["state"] as? Bool else { return }
-        self.setupControls(state)
+        guard notification.userInfo?["state"] is Bool else { return }
+        self.setupControls()
+    }
+
+    private func helperInstallTitle() -> String {
+        SMCHelper.shared.isInstalled ? localizedString("Reinstall fan helper") : localizedString("Install fan helper")
     }
     
     @objc private func controlCallback(_ notification: Notification) {

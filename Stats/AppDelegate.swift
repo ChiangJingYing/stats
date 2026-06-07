@@ -31,7 +31,8 @@ var modules: [Module] = [
     Network(),
     Battery(),
     Bluetooth(),
-    Clock()
+    Clock(),
+    RemoteUDPModule()
 ]
 
 @main
@@ -76,6 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             self.showSettingsIfNoActiveWidgets()
         }
         self.defaultValues()
+        RemoteUDP.shared.reload()
         self.icon()
         
         NotificationCenter.default.addObserver(self, selector: #selector(listenForAppPause), name: .pause, object: nil)
@@ -94,6 +96,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     
     func applicationWillTerminate(_ aNotification: Notification) {
         modules.forEach{ $0.terminate() }
+        RemoteUDP.shared.stop()
         SystemStats.shared.terminate()
     }
     

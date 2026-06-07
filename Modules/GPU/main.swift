@@ -179,6 +179,11 @@ public class GPU: Module {
         guard let utilization = selectedGPU.utilization else {
             return
         }
+
+        RemoteUDP.shared.updateGPUUsage(
+            total: utilization,
+            cores: self.remoteGPUUsage(from: value)
+        )
         
         self.portalView.callback(selectedGPU)
         self.notificationsView.usageCallback(utilization)
@@ -206,5 +211,24 @@ public class GPU: Module {
             WidgetCenter.shared.reloadTimelines(ofKind: GPU_entry.kind)
             WidgetCenter.shared.reloadTimelines(ofKind: "UnitedWidget")
         }
+    }
+
+    private func remoteGPUUsage(from gpus: GPUs) -> [RemoteUDPMetricTelemetry] {
+        var metrics: [RemoteUDPMetricTelemetry] = []
+        gpus.active().forEach { gpu in
+            if let value = gpu.utilization {
+                metrics.append(RemoteUDPMetricTelemetry(id: "\(gpu.id)-usage", name: gpu.model, value: value, unit: "%"))
+            }
+            if let value = gpu.renderUtilization {
+                metrics.append(RemoteUDPMetricTelemetry(id: "\(gpu.id)-render", name: "\(gpu.model) render", value: value, unit: "%"))
+            }
+            if let value = gpu.tilerUtilization {
+                metrics.append(RemoteUDPMetricTelemetry(id: "\(gpu.id)-tiler", name: "\(gpu.model) tiler", value: value, unit: "%"))
+            }
+            if let value = gpu.aneUtilization {
+                metrics.append(RemoteUDPMetricTelemetry(id: "\(gpu.id)-ane", name: "\(gpu.model) ANE", value: value, unit: "%"))
+            }
+        }
+        return metrics
     }
 }

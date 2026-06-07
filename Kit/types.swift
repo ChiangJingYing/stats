@@ -299,6 +299,8 @@ public extension Notification.Name {
     static let combinedModulesPopup = Notification.Name("combinedModulesPopup")
     static let remoteLoginSuccess = Notification.Name("remoteLoginSuccess")
     static let remoteState = Notification.Name("remoteState")
+    static let remoteUDPTelemetry = Notification.Name("remoteUDPTelemetry")
+    static let remoteUDPCommandAck = Notification.Name("remoteUDPCommandAck")
     static let openWindow = Notification.Name("openWindow")
 }
 
