@@ -21,6 +21,11 @@
 		5C0A9CAA2C46838A00EE6A89 /* GPU.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9A90E18924EAD2BB00471E9A /* GPU.framework */; };
 		5C0A9CAF2C46838F00EE6A89 /* RAM.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9A81C7562449A41400825D92 /* RAM.framework */; };
 		5C0A9CB42C46839500EE6A89 /* Disk.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9AF9EE0224648751005D2270 /* Disk.framework */; };
+		5C0A9CC02C46839500EE6A89 /* CPU.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9A97CECA2537331B00742D8F /* CPU.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		5C0A9CC12C46839500EE6A89 /* GPU.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9A90E18924EAD2BB00471E9A /* GPU.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		5C0A9CC22C46839500EE6A89 /* RAM.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9A81C7562449A41400825D92 /* RAM.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		5C0A9CC32C46839500EE6A89 /* Disk.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9AF9EE0224648751005D2270 /* Disk.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		5C0A9CC42C46839500EE6A89 /* Kit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9A2846F72666A9CC00EC1F6D /* Kit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		5C1E45562D11D66A00525864 /* libIOReport.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C1E45552D11D66200525864 /* libIOReport.tbd */; };
 		5C2016432D36D0EF0049C788 /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C2016422D36D0EF0049C788 /* Support.swift */; };
 		5C21D80B296C7B81005BA16D /* CombinedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C21D80A296C7B81005BA16D /* CombinedView.swift */; };
@@ -431,6 +436,11 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
+				5C0A9CC42C46839500EE6A89 /* Kit.framework in Embed Frameworks */,
+				5C0A9CC32C46839500EE6A89 /* Disk.framework in Embed Frameworks */,
+				5C0A9CC22C46839500EE6A89 /* RAM.framework in Embed Frameworks */,
+				5C0A9CC12C46839500EE6A89 /* GPU.framework in Embed Frameworks */,
+				5C0A9CC02C46839500EE6A89 /* CPU.framework in Embed Frameworks */,
 				5C645C012C591FFA00D8342A /* Net.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
